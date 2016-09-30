@@ -23,6 +23,7 @@ using Serilog.Events;
 using Serilog.Parsing;
 using Serilog.Policies;
 using System.Runtime.CompilerServices;
+using Serilog.Formatting.Display;
 
 namespace Serilog.Parameters
 {
@@ -65,13 +66,7 @@ namespace Serilog.Parameters
             _propagateExceptions = propagateExceptions;
             _maximumStringLength = maximumStringLength;
 
-            _scalarConversionPolicies = new IScalarConversionPolicy[]
-            {
-                new SimpleScalarConversionPolicy(BuiltInScalarTypes.Concat(additionalScalarTypes)),
-                new NullableScalarConversionPolicy(),
-                new EnumScalarConversionPolicy(),
-                new ByteArrayScalarConversionPolicy(),
-            };
+            _scalarConversionPolicies = CreateScalarConversionPolicies(additionalScalarTypes);
 
             _destructuringPolicies = additionalDestructuringPolicies
                 .Concat(new IDestructuringPolicy []
@@ -80,6 +75,18 @@ namespace Serilog.Parameters
                     new ReflectionTypesScalarDestructuringPolicy()
                 })
                 .ToArray();
+        }
+
+        private IScalarConversionPolicy[] CreateScalarConversionPolicies(IEnumerable<Type> additionalScalarTypes)
+        {
+            return new IScalarConversionPolicy[]
+            {
+                new StringLimitingConversionPolicy(_maximumStringLength), 
+                new SimpleScalarConversionPolicy(BuiltInScalarTypes.Concat(additionalScalarTypes)),
+                new NullableScalarConversionPolicy(),
+                new EnumScalarConversionPolicy(),
+                new ByteArrayScalarConversionPolicy(),
+            };
         }
 
         public LogEventProperty CreateProperty(string name, object value, bool destructureObjects = false)
@@ -131,15 +138,6 @@ namespace Serilog.Parameters
 
             var valueType = value.GetType();
             var limiter = new DepthLimiter(depth, _maximumDestructuringDepth, this);
-
-            if (destructuring == Destructuring.Destructure)
-            {
-                var stringValue = value as string;
-                if (stringValue != null)
-                {
-                    value = TruncateIfNecessary(stringValue);
-                }
-            }
 
             foreach (var scalarConversionPolicy in _scalarConversionPolicies)
             {            
@@ -204,18 +202,8 @@ namespace Serilog.Parameters
         private LogEventPropertyValue Stringify(object value)
         {
             var stringified = value.ToString();
-            var truncated = TruncateIfNecessary(stringified);
+            var truncated = Truncation.Apply(stringified, _maximumStringLength);
             return new ScalarValue(truncated);
-        }
-
-        string TruncateIfNecessary(string text)
-        {
-            if (text.Length > _maximumStringLength)
-            {
-                return text.Substring(0, _maximumStringLength - 1) + "…";
-            }
-
-            return text;
         }
 
         bool IsValueTypeDictionary(Type valueType)
